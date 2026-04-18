@@ -1,0 +1,184 @@
+name: "Just release it! (from TOML) 📦"
+description: "Easiest-to-setup GitHub release for python projects - just read version from pyproject.toml, build changelog and release it!"
+author: "Lex Darlog"
+
+branding:
+  # https://feathericons.com/
+  icon: package
+#  icon: tag
+#  icon: code
+  color: green
+#  color: blue
+#  color: gray-dark
+
+inputs:
+  toml-file:
+    description: 'Path to a TOML file to extract version from'
+    required: false
+    default: 'pyproject.toml'
+  attach-files:
+    description: 'Glob of files to attach (e.g. "dist/*"). Leave empty (default) for source-only release.'
+    required: false
+    default: ''
+  changelog-mode:
+    description: |
+      The mode to use for changelog generation:
+      - 'HYBRID' (default) - include both PRs and regular commits.
+      - 'PR' - build changelog ony from PRs.
+      - 'COMMIT' - build changelog ony from commit messages.
+      See 'mode' input in: https://github.com/mikepenz/release-changelog-builder-action#action-inputs
+    required: false
+    default: 'HYBRID'
+  changelog-expand-squash-merges:
+    description: |
+      Set to 'true' if you want to find PRs inside squashed merges.
+      See 'fetchViaCommits' input in: https://github.com/mikepenz/release-changelog-builder-action#action-inputs
+    required: false
+    default: ''
+  skip-version-standardize:
+    description: 'Skip standardizing the version for the release title/tag (see: Lex-DRL/standardize-version-action)'
+    required: false
+    default: 'false'
+  skip-python-setup:
+    description: 'Skip setup-python step (used only to standardize version) if caller already did it. Irrelevant if version-standardization is skipped.'
+    required: false
+    default: 'false'
+  python-version:
+    description: 'Python version to use internally (used only to standardize version).  Irrelevant if version-standardization is skipped.'
+    required: false
+    default: '3.x'
+  is-pre-release:
+    description: |
+      Override pre-release status:
+      - '' (empty, default) - let the version-standardizing step to decide (or 'false' if this step is skipped)
+      - 'false' - force regular release
+      - 'true' or any other value - force pre-release
+    required: false
+    default: ''
+  is-draft:
+    description: 'Create release as draft'
+    required: false
+    default: 'false'
+
+#  skip-checkout:
+#    description: 'true if caller already checked out the repo'
+#    required: false
+#    default: 'false'
+
+outputs:
+  tag:
+    description: 'Final tag name (with "v" prefix if version was standardized, or version extracted from TOML as-is)'
+    value: ${{ steps.final-outputs.outputs.tag }}
+  raw-version:
+    description: 'Version without "v" prefix (if it was standardized, or version extracted from TOML as-is)'
+    value: ${{ steps.final-outputs.outputs.raw_version }}
+  is-pre:
+    description: 'Whether the release is marked as pre-release'
+    value: ${{ steps.final-outputs.outputs.is_pre }}
+  changelog:
+    description: 'The auto-generated changelog aka release description'
+    value: ${{ steps.build-changelog.outputs.changelog }}
+
+runs:
+  using: "composite"
+  steps:
+#    - name: Checkout repository
+#      if: inputs.skip-checkout != 'true'
+#      uses: actions/checkout@v6
+#      with:
+#        fetch-depth: 0
+
+    - name: ➡️ Extract version from 'pyproject.toml'
+      id: toml-version
+      uses: SebRollen/toml-action@v1.2.0
+      with:
+        file: ${{ inputs.toml-file }}
+        field: 'project.version'
+
+    - name: 🔢 Standardize Version
+      id: standard-version
+      if: inputs.skip-version-standardize == '' || inputs.skip-version-standardize == 'false'
+      uses: Lex-DRL/standardize-version-action@main
+      with:
+        version: ${{ steps.toml-version.outputs.value }}
+        python-version: ${{ inputs.python-version }}
+        skip-python-setup: ${{ inputs.skip-python-setup }}
+
+    - name: Determine final outputs (whether standardize-version done or skipped)
+      id: final-outputs
+      # To avoid unnecessary python setup, do it in pure bash:
+      shell: bash
+      run: |
+        if [ -z '${{ inputs.skip-version-standardize }}' ] || [ '${{ inputs.skip-version-standardize }}' = 'false' ]; then
+          echo 'tag=${{ steps.standard-version.outputs.v }}' >> "$GITHUB_OUTPUT"
+          echo 'raw_version=${{ steps.standard-version.outputs.full }}' >> "$GITHUB_OUTPUT"
+          if [ -z '${{ inputs.is-pre-release }}' ]; then
+            echo 'is_pre=${{ steps.standard-version.outputs.is-pre }}' >> "$GITHUB_OUTPUT"
+          elif [ '${{ inputs.is-pre-release }}' = 'false' ]; then
+            echo 'is_pre=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'is_pre=true' >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo 'tag=${{ steps.toml-version.outputs.value }}' >> "$GITHUB_OUTPUT"
+          echo 'raw_version=${{ steps.toml-version.outputs.value }}' >> "$GITHUB_OUTPUT"
+          if [ -z '${{ inputs.is-pre-release }}' ] || [ '${{ inputs.is-pre-release }}' = 'false' ]; then
+            echo 'is_pre=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'is_pre=true' >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+    # The mikepenz/release-changelog-builder-action has issues detecting
+    # the start point, so let's do it ourselves:
+    - name: 'Determine changelog start point (fallback order: prior release → latest tag → initial commit)'
+      id: changelog-start
+      shell: bash
+      run: |
+        if gh release list --limit 1 --json tagName >/dev/null 2>&1; then
+          echo '📦 A prior GitHub Release exists (pre-release counts)'
+          echo '→ letting "mikepenz/release-changelog-builder-action" use its default (latest release):'
+          echo 'fromTag=""'
+          echo 'fromTag=' >> "$GITHUB_OUTPUT"
+        else
+          echo 'No prior GitHub Release found, checking tags...'
+          LATEST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+          if [ -n "$LATEST_TAG" ]; then
+            echo '🏷️ A prior Git tag exists'
+            echo '→ using the latest one:'
+            echo "fromTag=$LATEST_TAG"
+            echo "fromTag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          else
+            FIRST_COMMIT="$(git rev-list --max-parents=0 HEAD)"
+            echo '❗️Neither prior releases nor any tags found (first release?)'
+            echo '→ using first commit SHA:'
+            echo "fromTag=$FIRST_COMMIT"
+            echo "fromTag=$FIRST_COMMIT" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+    - name: Build changelog
+      id: build-changelog
+      uses: mikepenz/release-changelog-builder-action@v6
+      with:
+        mode: ${{ inputs.changelog-mode }}
+        fetchViaCommits: ${{ inputs.changelog-expand-squash-merges }}
+        fromTag: ${{ steps.changelog-start.outputs.fromTag }}
+        toTag: ${{ github.sha }}  # supposed to default to the latest commit, but doesn't really work - so, give it explicitly
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+#    - name: 🔄 Create GitHub Release
+    - name: 📦 Create GitHub Release
+      uses: softprops/action-gh-release@v3
+      with:
+        tag_name: ${{ steps.final-outputs.outputs.tag }}
+        name: ${{ steps.final-outputs.outputs.tag }}
+        body: ${{ steps.build-changelog.outputs.changelog }}
+        files: ${{ inputs.attach-files }}
+        draft: ${{ inputs.is-draft }}
+        prerelease: ${{ steps.final-outputs.outputs.is_pre }}
+        token: ${{ github.token }}
+        # Other defaults to possibly expose as inputs later:
+        # make_latest: 'auto'     # GitHub decides based on prerelease/draft
+        # generate_release_notes: false   # we already have custom changelog
