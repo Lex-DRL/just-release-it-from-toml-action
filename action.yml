@@ -203,9 +203,9 @@ runs:
         {%- set sha7 = commit.id | truncate(length=7, end="") -%}
         {%- set who = commit.remote.username | default(value=commit.author.name) -%}
         - {% if commit.remote.pr_number -%}
-        {{ commit.remote.pr_title | default(value=title) }} ([#{{ commit.remote.pr_number }}](https://github.com/${{ github.repository }}/pull/{{ commit.remote.pr_number }})) @{{ who }}
-        {% else -%}
-        {{ title }} ([{{ sha7 }}](https://github.com/${{ github.repository }}/commit/{{ commit.id }})) @{{ who }}
+        {{ commit.remote.pr_title | default(value=title) }} — #{{ commit.remote.pr_number }} by @{{ who }}
+        {%- else -%}
+        {{ title }} — {{ commit.id }} by @{{ who }}
         {%- if cbody %}
         {{ "  > " ~ cbody | replace(from="\n", to="\n  > ") }}
         {%- endif %}
