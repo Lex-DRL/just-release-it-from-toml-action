@@ -12,10 +12,16 @@ branding:
 #  color: gray-dark
 
 inputs:
-  toml-file:
+  project-toml-file:
     description: 'Path to a TOML file to extract version from'
     required: false
     default: 'pyproject.toml'
+  cliff-config-file:
+    description: |
+      Provide an in-repo path to your own TOML file (e.g. "cliff.toml") with custom config for `orhun/git-cliff-action` (used internally to generate changelog).
+      When left empty, the default one us used.
+    required: false
+    default: ''
   attach-files:
     description: 'Glob of files to attach (e.g. "dist/*"). Leave empty (default) for source-only release.'
     required: false
@@ -25,11 +31,11 @@ inputs:
     required: false
     default: 'false'
   skip-python-setup:
-    description: 'Skip setup-python step (only used for version standardization) if caller already did it. Irrelevant if version-standardization is skipped.'
+    description: 'Skip setup-python step if caller already did it.'
     required: false
     default: 'false'
   python-version:
-    description: 'Python version to use internally (only for version standardization). Irrelevant if version-standardization is skipped.'
+    description: 'Python version to use internally.'
     required: false
     default: '3.x'
   is-pre-release:
@@ -77,11 +83,18 @@ runs:
 #      with:
 #        fetch-depth: 0
 
+    - name: Set up Python
+      if: inputs.skip-python-setup == 'false' || inputs.skip-python-setup == ''
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+#        cache: 'pip'
+
     - name: ➡️ Extract version from 'pyproject.toml'
       id: toml-version
       uses: SebRollen/toml-action@v1.2.0
       with:
-        file: ${{ inputs.toml-file }}
+        file: ${{ inputs.project-toml-file }}
         field: 'project.version'
 
     - name: 🔢 Standardize Version
@@ -90,8 +103,7 @@ runs:
       uses: Lex-DRL/standardize-version-action@main
       with:
         version: ${{ steps.toml-version.outputs.value }}
-        python-version: ${{ inputs.python-version }}
-        skip-python-setup: ${{ inputs.skip-python-setup }}
+        skip-python-setup: true
 
     - name: Set version outputs (whether with standardization or not)
       id: version-outputs
@@ -118,7 +130,39 @@ runs:
           fi
         fi
 
+    - name: ⤏ Detect internal commits (from merged branch) to skip
+      id: skip-commits
+      shell: bash
+      run: |
+        # Find the previous tag (falls back to very first commit if none exists)
+        PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          RANGE="HEAD"
+        else
+          RANGE="${PREV_TAG}..HEAD"
+        fi
+        
+        # All commits in range vs. first-parent-only (= main branch line)
+        ALL=$(git log --format="%H" "$RANGE" 2>/dev/null || true)
+        FIRST=$(git log --first-parent --format="%H" "$RANGE" 2>/dev/null || true)
+        
+        # Branch-internal commits = in ALL but not in FIRST
+        BRANCH=$(comm -23 <(echo "$ALL" | sort) <(echo "$FIRST" | sort))
+        
+        # Build space-separated --skip-commit flags for git-cliff
+        SKIP_ARGS=""
+        while IFS= read -r sha; do
+          [[ -n "$sha" ]] && SKIP_ARGS="$SKIP_ARGS --skip-commit $sha"
+        done <<< "$BRANCH"
+        # Strip leading space and export for the git-cliff step
+        echo "CLIFF_SKIP_ARGS=${SKIP_ARGS# }" >> "$GITHUB_ENV"
+        
+        # Debug: how many commits are being excluded
+        BRANCH_COUNT=$(echo "$BRANCH" | grep -c . 2>/dev/null || echo 0)
+        echo "Skipping ${BRANCH_COUNT} branch-internal commit(s)"
+
     - name: Prepare default git-cliff configuration
+      if: inputs.cliff-config-file == ''
       shell: bash
       run: |
         cat > /tmp/cliff.toml << 'EOT'
@@ -138,24 +182,33 @@ runs:
         
         [remote.github]
         owner = "${{ github.repository_owner }}"
-        repo = "${{ github.repository }}"
+        repo = "${{ github.event.repository.name }}"
         
         [changelog]
-        header = "## What's Changed\n"
+        trim = true
+        header = ""
+        footer = ""
         body = """
-        {% for group, commits in commits | group_by(attribute="group") %}
+        {%- for group, commits in commits | group_by(attribute="group") -%}
         ### {{ group | upper_first }}
+        
         {% for commit in commits %}
-        - {% if commit.remote.pr_number %}[{{ commit.message }}](https://github.com/${{ github.repository }}/pull/{{ commit.remote.pr_number }}){% else %}{{ commit.message }}{% endif %} ({{ commit.id | truncate(length=8, end="") }})
-          {% if commit.body %}
-            {% for line in commit.body | split(pat="\n") %}
-              - {{ line | trim }}
-            {% endfor %}
-          {% endif %}
+        {%- set msg = commit.message | trim -%}
+        {%- set title = msg | split(pat="\n") | first | trim -%}
+        {%- set cbody = msg | split(pat="\n") | slice(start=1) | join(sep="\n") | trim -%}
+        {%- set sha7 = commit.id | truncate(length=7, end="") -%}
+        {%- set who = commit.remote.username | default(value=commit.author.name) -%}
+        - {% if commit.remote.pr_number -%}
+        {{ commit.remote.pr_title | default(value=title) }} ([#{{ commit.remote.pr_number }}](https://github.com/${{ github.repository }}/pull/{{ commit.remote.pr_number }})) @{{ who }}
+        {% else -%}
+        {{ title }} ([{{ sha7 }}](https://github.com/${{ github.repository }}/commit/{{ commit.id }})) @{{ who }}
+        {%- if cbody %}
+        {{ "  > " ~ cbody | replace(from="\n", to="\n  > ") }}
+        {%- endif %}
+        {%- endif %}
         {% endfor %}
         {% endfor %}
         """
-        footer = ""
         EOT
 
     - name: 📝 Build changelog with git-cliff ⛰️
@@ -163,8 +216,8 @@ runs:
       uses: orhun/git-cliff-action@v4
       with:
 #        version: ${{ steps.version-outputs.outputs.raw_version }}  # version of cliff itself
-        config: /tmp/cliff.toml
-        args: --unreleased --strip all
+        config: ${{ inputs.cliff-config-file != '' && inputs.cliff-config-file || '/tmp/cliff.toml' }}
+        args: --unreleased --strip all ${{ env.CLIFF_SKIP_ARGS }}
       env:
         OUTPUT: /tmp/changelog-just-release-it.md
         GITHUB_REPO: ${{ github.repository }}
