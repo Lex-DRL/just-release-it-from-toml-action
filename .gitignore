@@ -181,3 +181,16 @@ dmypy.json
 # 	Repo-specific
 # =========================================================================== #
 TEST_GITHUB_OUTPUT
+
+# Debug/dummy/test files/dirs
+qqq*
+www*
+eee*
+aaa*
+sss*
+ddd*
+zzz*
+xxx*
+ccc*
+# The generated test-config
+/cliff.just-release-it.toml
