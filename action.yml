@@ -135,7 +135,7 @@ runs:
       shell: bash
       run: |
         # Find the previous tag (falls back to very first commit if none exists)
-        PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        PREV_TAG=$(git describe --tags --abbrev=0 --match "v[0-9]*" 2>/dev/null || echo "")
         if [ -z "$PREV_TAG" ]; then
           RANGE="HEAD"
         else
