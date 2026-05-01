@@ -454,9 +454,7 @@ body = """
 {%- set display_group = group | striptags | trim | upper_first -%}
 {% if display_group == "🔀 Changes" -%}
 {%- if has_specific %}## ${{ inputs.cat-unclassified-multi }}{% else %}## ${{ inputs.cat-unclassified-only }}{% endif %}
-{%- else %}
-## {{ display_group }}
-{%- endif %}
+{%- else %}## {{ display_group }}{%- endif %}
 
 {% for commit in commits %}
 {%- set msg = commit.message | trim -%}
