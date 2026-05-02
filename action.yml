@@ -169,19 +169,52 @@ runs:
       if: inputs.cliff-config-file == ''
       shell: bash
       run: |
-        cat > /tmp/cliff.toml << 'EOT'
+        cat > /tmp/cliff.just-release-it.toml << 'EOT'
         [git]
         filter_unconventional = false
         sort_commits = "oldest"
         topo_order_commits = true
+        protect_breaking_commits = true
         
         commit_parsers = [
-          { message = "^Merge pull request", group = "Changes" },
-          { message = "^feat", group = "Features" },
-          { message = "^fix", group = "Fixes" },
-          { message = "^docs", group = "Documentation" },
-          { message = "^refactor", group = "Refactor" },
-          { message = ".*", group = "Changes" },  # catch-all for everything else
+          # Each category: PR-title field match first, then commit message match.
+          # Field matches only fire when remote.pr_title is set (i.e., actual PR merges),
+          # so they never interfere with regular commits.
+        
+          # Breaking changes
+          { field = "remote.pr_title", pattern = "(?i)^(breaking|BREAKING CHANGE)", group = "<!-- 0 -->💥 Breaking Changes" },
+          { message = "(?i)^(breaking change|BREAKING CHANGE)", group = "<!-- 0 -->💥 Breaking Changes" },
+        
+          # Features
+          { field = "remote.pr_title", pattern = "(?i)^feat", group = "<!-- 1 -->✨ Features" },
+          { message = "(?i)^feat", group = "<!-- 1 -->✨ Features" },
+        
+          # Bug fixes
+          { field = "remote.pr_title", pattern = "(?i)^fix", group = "<!-- 2 -->🐛 Bug Fixes" },
+          { message = "(?i)^fix", group = "<!-- 2 -->🐛 Bug Fixes" },
+        
+          # Performance
+          { field = "remote.pr_title", pattern = "(?i)^perf", group = "<!-- 3 -->⚡ Performance" },
+          { message = "(?i)^perf", group = "<!-- 3 -->⚡ Performance" },
+        
+          # Security
+          { field = "remote.pr_title", pattern = "(?i)^sec", group = "<!-- 4 -->🔒 Security" },
+          { message = "(?i)^sec", group = "<!-- 4 -->🔒 Security" },
+        
+          # Documentation
+          { field = "remote.pr_title", pattern = "(?i)^docs?", group = "<!-- 5 -->📝 Documentation" },
+          { message = "(?i)^docs?", group = "<!-- 5 -->📝 Documentation" },
+        
+          # Refactor
+          { field = "remote.pr_title", pattern = "(?i)^refactor", group = "<!-- 6 -->🚜 Refactor" },
+          { message = "(?i)^refactor", group = "<!-- 6 -->🚜 Refactor" },
+        
+          # Version bumps — must be listed BEFORE the catch-all
+          { field = "remote.pr_title", pattern = "(?i)^(version|ver|bump|release)\\b", group = "<!-- 9 -->🔖 Version" },
+          { message = "(?i)^(version|ver|bump|release)\\b", group = "<!-- 9 -->🔖 Version" },
+        
+          # Catch-all: everything else (uncategorized commits AND uncategorized PR merges)
+          { message = ".*", group = "<!-- 8 -->🔀 Changes" },
         ]
         
         [remote.github]
@@ -193,8 +226,21 @@ runs:
         header = ""
         footer = ""
         body = """
-        {%- for group, commits in commits | group_by(attribute="group") -%}
-        ### {{ group | upper_first }}
+        {%- set grouped = commits | group_by(attribute="group") -%}
+        {%- set has_specific = false -%}
+        {%- for g, gc in grouped -%}
+          {%- set dg = g | split(pat="-->") | last | trim -%}
+          {%- if dg != "🔀 Changes" and dg != "🔖 Version" -%}
+            {%- set_global has_specific = true -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- for group, commits in grouped -%}
+        {%- set display_group = group | split(pat="-->") | last | trim -%}
+        {% if display_group == "🔀 Changes" -%}
+        {%- if has_specific %}## 🔀 Other changes{% else %}## 🔀 What's changed{% endif %}
+        {%- else %}
+        ## {{ display_group }}
+        {%- endif %}
         
         {% for commit in commits %}
         {%- set msg = commit.message | trim -%}
@@ -220,10 +266,10 @@ runs:
       uses: orhun/git-cliff-action@v4
       with:
 #        version: ${{ steps.version-outputs.outputs.raw_version }}  # version of cliff itself
-        config: ${{ inputs.cliff-config-file != '' && inputs.cliff-config-file || '/tmp/cliff.toml' }}
+        config: ${{ inputs.cliff-config-file != '' && inputs.cliff-config-file || '/tmp/cliff.just-release-it.toml' }}
         args: --unreleased --strip all ${{ env.CLIFF_SKIP_ARGS }}
       env:
-        OUTPUT: /tmp/changelog-just-release-it.md
+        OUTPUT: '${{ runner.temp }}/changelog.just-release-it.md'
         GITHUB_REPO: ${{ github.repository }}
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || inputs.github-token || github.token }}
 
