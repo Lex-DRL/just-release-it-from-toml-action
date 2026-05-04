@@ -7,9 +7,10 @@ All input values are passed as env-vars.
 """
 
 import typing as _t
+from typing import Any as _A, Optional as _O, Union as _U
 
 from itertools import chain
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import os
 import re
 
@@ -81,6 +82,8 @@ def is_true_str(str_bool: _O[str]) -> bool:
 
 @dataclass
 class ConfigGenerator:
+	cat_alert_blocks: bool = True
+
 	cat_breaking: str = '💥 Breaking Changes 💥'
 	cat_depr: str = '⚠️ Deprecations'
 	cat_revert: str = '↩️ Rollbacks'
@@ -452,22 +455,30 @@ body = """
 {%- endfor -%}
 {%- for group, commits in grouped -%}
 {%- set display_group = group | striptags | trim | upper_first -%}
+{%- set_global alert_type = "" -%}
+{%- set_global alert_indent = "" -%}${{ PUT_ALERT_TEMPLATE_LINES_HERE }}
 {% if display_group == "🔀 Changes" -%}
-{%- if has_specific %}## ${{ inputs.cat-unclassified-multi }}{% else %}## ${{ inputs.cat-unclassified-only }}{% endif %}
-{%- else %}## {{ display_group }}{%- endif %}
-
+  {%- if has_specific -%}
+  {{ alert_indent }}## ${{ inputs.cat-unclassified-multi }}
+  {%- else -%}
+  {{ alert_indent }}## ${{ inputs.cat-unclassified-only }}
+  {%- endif -%}
+{% else -%}
+  {{ alert_indent }}## {{ display_group }}
+{%- endif %}
+{{ alert_indent }}
 {% for commit in commits %}
 {%- set msg = commit.message | trim -%}
 {%- set title = msg | split(pat="\n") | first | trim -%}
 {%- set cbody = msg | split(pat="\n") | slice(start=1) | join(sep="\n") | trim -%}
 {%- set sha7 = commit.id | truncate(length=7, end="") -%}
 {%- set who = commit.remote.username | default(value=commit.author.name) -%}
-- {% if commit.remote.pr_number -%}
+{{ alert_indent }}- {% if commit.remote.pr_number -%}
 {{ commit.remote.pr_title | default(value=title) }} — #{{ commit.remote.pr_number }} by @{{ who }}
 {%- else -%}
 {{ title }} — {{ commit.id }} by @{{ who }}
 {%- if cbody %}
-{{ "  > " ~ cbody | replace(from="\n", to="\n  > ") }}
+{{ alert_indent ~ "  > " ~ cbody | replace(from="\n", to="\n" ~ alert_indent ~ "  > ") }}
 {%- endif %}
 {%- endif %}
 {% endfor %}
@@ -475,14 +486,35 @@ body = """
 """
 		'''.strip()
 
+		alert_template_lines = '\n' + r"""
+{%- if display_group == "${{ inputs.cat-breaking }}" -%}
+  {%- set_global alert_type = "CAUTION" -%}
+  {%- set_global alert_indent = "> " -%}
+{%- elif display_group == "${{ inputs.cat-depr }}" -%}
+  {%- set_global alert_type = "WARNING" -%}
+  {%- set_global alert_indent = "> " -%}
+{%- elif display_group == "${{ inputs.cat-revert }}" -%}
+  {%- set_global alert_type = "IMPORTANT" -%}
+  {%- set_global alert_indent = "> " -%}
+{%- endif -%}
+{%- if alert_type != "" -%}
+> [!{{ alert_type }}]
+{% endif -%}
+		""".strip()
+		if not self.cat_alert_blocks:
+			alert_template_lines = ''
+
+		lines_str = lines_str.replace('${{ PUT_ALERT_TEMPLATE_LINES_HERE }}', alert_template_lines)
+
 		# Since the template itself contains A TON of curly braces,
 		# let's put the values with simple replace instead of format:
-		for old, new in [
-			('${{ inputs.cat-version }}', self.cat_version),
-			('${{ inputs.cat-unclassified-multi }}', self.cat_unclassified_multi),
-			('${{ inputs.cat-unclassified-only }}', self.cat_unclassified_only),
-		]:
-			lines_str = lines_str.replace(old, new)
+		# noinspection PyTypeChecker
+		instance_dict = asdict(self)
+		for attr_name, value in instance_dict.items():
+			github_input = attr_name.replace('_', '-')
+			github_expr = '${{ inputs.' + github_input + ' }}'
+			value_str = toml_repr(str(value), dont_wrap_in_quotes=True)
+			lines_str = lines_str.replace(github_expr, value_str)
 
 		return lines_str.splitlines()
 
@@ -517,6 +549,8 @@ def main(fallback_out_file='cliff.just-release-it.toml') -> None:
 	# So, retrieve them:
 	kwargs = {
 		nm: cleanup_as_single_line(os.environ.get(nm)) for nm in [
+			'cat_alert_blocks',
+
 			'cat_breaking',
 			'cat_depr',
 			'cat_revert',
@@ -542,7 +576,20 @@ def main(fallback_out_file='cliff.just-release-it.toml') -> None:
 			'out_config_file',
 		]
 	}
+
+	# String-boolean values have to be processed before filtering out:
+	try:
+		cat_alert_blocks_str = kwargs.pop('cat_alert_blocks')
+	except KeyError:
+		cat_alert_blocks_str = str(ConfigGenerator.cat_alert_blocks)
+	cat_alert_blocks_bool = is_true_str(cat_alert_blocks_str)
+
+	# Now, filer out any unset strings to fall back to defaults:
 	kwargs = {k: v for k, v in kwargs.items() if v}
+
+	# ... and restore the actual bool values:
+	# noinspection PyTypeChecker
+	kwargs['cat_alert_blocks'] = cat_alert_blocks_bool
 
 	try:
 		out_config_file = kwargs.pop('out_config_file')

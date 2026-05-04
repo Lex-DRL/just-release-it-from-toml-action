@@ -24,6 +24,13 @@ inputs:
     description: 'Glob of files to attach (e.g. "dist/*"). Leave empty (default) for source-only release.'
     required: false
     default: ''
+  cat-alert-blocks:
+    description: |
+      Wrap Breaking Changes, Deprecations and Rollbacks sections in GitHub alert blocks
+      ([!CAUTION], [!WARNING], [!IMPORTANT] respectively).
+      Set to 'false' / empty string to disable and render them as plain sections like all others.
+    required: false
+    default: 'true'
   cat-breaking:
     description: 'The title used for "Breaking Changes" category.'
     required: false
@@ -249,6 +256,7 @@ runs:
       if: inputs.cliff-config-file == ''
       shell: bash
       env:
+        cat_alert_blocks: ${{ inputs.cat-alert-blocks }}
         cat_breaking: ${{ inputs.cat-breaking }}
         cat_depr: ${{ inputs.cat-depr }}
         cat_revert: ${{ inputs.cat-revert }}
