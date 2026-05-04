@@ -248,164 +248,36 @@ runs:
     - name: Prepare default git-cliff configuration
       if: inputs.cliff-config-file == ''
       shell: bash
-      run: |
-        cat > /tmp/cliff.just-release-it.toml << 'EOT'
-        [git]
-        filter_unconventional = false
-        sort_commits = "oldest"
-        topo_order_commits = true
-        protect_breaking_commits = true
-        # This ^ prevents commits with `breaking = true` from being suppressed by any `{ ..., skip = true }` parser.
-        # Skips aren't used in this template yet, but let's have it just as a fail-safe for the future.
-        
-        commit_parsers = [
-          # Each category: PR-title field match first, then commit message match.
-          # Field matches only fire when remote.pr_title is set (i.e., actual PR merges),
-          # so they never interfere with regular commits.
-        
-          # The "<!-- X-Y -->" prefix in each group name sets their display order.
-          # It's used only internally and never gets to the final output -
-          # thanks to "striptags" in the template.
-        
-          # https://gitmoji.dev/
-        
-          # Order-1
-          # ❗ Important warnings
-        
-          # 💥 Breaking Changes 💥
-          # 1. Conventional breaking commits (feat!, fix!, BREAKING CHANGE footer) — native `cliff` field:
-          { breaking = true, group = "<!-- 1-1 -->${{ inputs.cat-breaking }}" },
-          # 2. PR titles starting with "breaking" or the same "prefix!" pattern:
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(💥|❗|❕|‼️|‼|:boom:|[a-zA-Z_]+(\\([a-zA-Z_0-9-]+\\))?!\\s*:|break(s|ing)?\\b)", group = "<!-- 1-1 -->${{ inputs.cat-breaking }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(💥|❗|❕|‼️|‼|:boom:|[a-zA-Z_]+(\\([a-zA-Z_0-9-]+\\))?!\\s*:|break(s|ing)?\\b)", group = "<!-- 1-1 -->${{ inputs.cat-breaking }}" },
-          # 3. Plain ^ commit messages with the same start
-        
-          # ⚠️ Deprecations
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?depr(ecat(ed?|ing|ion)?)?s?\\b", group = "<!-- 1-2 -->${{ inputs.cat-depr }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?depr(ecat(ed?|ing|ion)?)?s?\\b", group = "<!-- 1-2 -->${{ inputs.cat-depr }}" },
-        
-          # ↩️ Rollbacks
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(↩️|↩|↶|🔙|⏪️|⏪|:rewind:|(revert|undo|(rl|roll)\\s*(bk|back)s?)\\b)", group = "<!-- 1-3 -->${{ inputs.cat-revert }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(↩️|↩|↶|🔙|⏪️|⏪|:rewind:|(revert|undo|(rl|roll)\\s*(bk|back)s?)\\b)", group = "<!-- 1-3 -->${{ inputs.cat-revert }}" },
-        
-          # Order-2
-          # 👨🏻 User-oriented updates
-        
-          # ✨ New Features
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(✨|🌟|⭐|🎉|:sparkles:|:tada:|new(\\([a-zA-Z_0-9-]+\\))?!?\\s*:|(feat(ure)?|(add|support)(e?[ds]?|ing)?)\\b)", group = "<!-- 2-1 -->${{ inputs.cat-feat }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(✨|🌟|⭐|🎉|:sparkles:|:tada:|new(\\([a-zA-Z_0-9-]+\\))?!?\\s*:|(feat(ure)?|(add|support)(e?[ds]?|ing)?)\\b)", group = "<!-- 2-1 -->${{ inputs.cat-feat }}" },
-        
-          # 🚀 Improvements
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🚀|🚩|🚸|♿️|:rocket:|:triangular_flag_on_post:|:children_crossing:|:wheelchair:|(upd(ate[ds]?)?|chang(e[ds]?|ing)|(enhn?c?|enhance?|impr|improve?)(ment|mn?t?)?|(more\\s+)?(better|robust(ness)?))\\b)", group = "<!-- 2-2 -->${{ inputs.cat-enhance }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🚀|🚩|🚸|♿️|:rocket:|:triangular_flag_on_post:|:children_crossing:|:wheelchair:|(upd(ate[ds]?)?|chang(e[ds]?|ing)|(enhn?c?|enhance?|impr|improve?)(ment|mn?t?)?|(more\\s+)?(better|robust(ness)?))\\b)", group = "<!-- 2-2 -->${{ inputs.cat-enhance }}" },
-        
-          # 🛠️ Fixes
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🛠️|🛠|🐛|🩹|🚑️|🚑|🚨|🥅|:bug:|:adhesive_bandage:|:ambulance:|:rotating_light:|:goal_net:|(bug(fix)?|fix(e?[ds]?|ing)?)\\b)", group = "<!-- 2-3 -->${{ inputs.cat-fix }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🛠️|🛠|🐛|🩹|🚑️|🚑|🚨|🥅|:bug:|:adhesive_bandage:|:ambulance:|:rotating_light:|:goal_net:|(bug(fix)?|fix(e?[ds]?|ing)?)\\b)", group = "<!-- 2-3 -->${{ inputs.cat-fix }}" },
-        
-          # ⚡ Performance
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(⚡️|⚡|:zap:|pe?rf(ormance)?\\b)", group = "<!-- 2-4 -->${{ inputs.cat-perf }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(⚡️|⚡|:zap:|pe?rf(ormance)?\\b)", group = "<!-- 2-4 -->${{ inputs.cat-perf }}" },
-        
-          # 🔒 Security
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🔒|🔐|🛡️|🛡|:lock:|:closed_lock_with_key:|sec(urity)?\\b)", group = "<!-- 2-5 -->${{ inputs.cat-security }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🔒|🔐|🛡️|🛡|:lock:|:closed_lock_with_key:|sec(urity)?\\b)", group = "<!-- 2-5 -->${{ inputs.cat-security }}" },
-        
-          # Order-3
-          # 👨🏻‍💻 Dev-oriented updates
-        
-          # 📝 Documentation
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(📝|📄|💬|:memo:|:page_facing_up:|:speech_balloon:|(doc(ument)?(e?[ds]?|ing|ation)?|readme)\\b)", group = "<!-- 3-1 -->${{ inputs.cat-doc }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(📝|📄|💬|:memo:|:page_facing_up:|:speech_balloon:|(doc(ument)?(e?[ds]?|ing|ation)?|readme)\\b)", group = "<!-- 3-1 -->${{ inputs.cat-doc }}" },
-        
-          # ♻️ Refactor
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(♻️|♻|🚚|:recycle:|:truck:|refac(tor(ing)?)?\\b)", group = "<!-- 3-2 -->${{ inputs.cat-refactor }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(♻️|♻|🚚|:recycle:|:truck:|refac(tor(ing)?)?\\b)", group = "<!-- 3-2 -->${{ inputs.cat-refactor }}" },
-        
-          # 🔬 Tests
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🔬|🧪|⚗️|✅|🦺|:test_tube:|:alembic:|:white_check_mark:|:safety_vest:|te?st(e?[ds]?|ing)?\\b)", group = "<!-- 3-3 -->${{ inputs.cat-test }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🔬|🧪|⚗️|✅|🦺|:test_tube:|:alembic:|:white_check_mark:|:safety_vest:|te?st(e?[ds]?|ing)?\\b)", group = "<!-- 3-3 -->${{ inputs.cat-test }}" },
-        
-          # 🎨 Code Style
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🎨|:art:|(cd|code)?[^a-zA-Z0-9]*(fo?r?ma?t|sty?le?)(e?[ds]?|ing)?\\b)", group = "<!-- 3-4 -->${{ inputs.cat-style }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🎨|:art:|(cd|code)?[^a-zA-Z0-9]*(fo?r?ma?t|sty?le?)(e?[ds]?|ing)?\\b)", group = "<!-- 3-4 -->${{ inputs.cat-style }}" },
-        
-          # 📦 Build/Packaging
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(📦|:package:|bu?i?ld(s|ing)?\\b)", group = "<!-- 3-5 -->${{ inputs.cat-build }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(📦|:package:|bu?i?ld(s|ing)?\\b)", group = "<!-- 3-5 -->${{ inputs.cat-build }}" },
-        
-          # 🤖 CI/CD
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🤖|👷|:construction_worker:|c[id]\\b)", group = "<!-- 3-6 -->${{ inputs.cat-ci }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🤖|👷|:construction_worker:|c[id]\\b)", group = "<!-- 3-6 -->${{ inputs.cat-ci }}" },
-        
-          # 🧹 Maintenance
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🧹|🙈|💸|:see_no_evil:|:money_with_wings:|(cho?re?|clean(up)?|maint[ae]i?n([ae]n?ce)?|git(hub|ignore|att?ri?b?u?t?e?s?)?)\\b)", group = "<!-- 3-7 -->${{ inputs.cat-chore }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🧹|🙈|💸|:see_no_evil:|:money_with_wings:|(cho?re?|clean(up)?|maint[ae]i?n([ae]n?ce)?|git(hub|ignore|att?ri?b?u?t?e?s?)?)\\b)", group = "<!-- 3-7 -->${{ inputs.cat-chore }}" },
-        
-          # Order-9
-          # Always last
-        
-          # Version-related changes:
-          # Caught BEFORE the catch-all, inserted after
-          { field = "remote.pr_title", pattern = "(?i)^[^a-zA-Z0-9]*?(🔖|🏷️|🏷|:bookmark:|:label:|(v(er)?[^a-zA-Z0-9]*[0-9]+|ver(sion)?|bump|release)\\b)", group = "<!-- 9-2 -->${{ inputs.cat-version }}" },
-          { message = "(?i)^[^a-zA-Z0-9]*?(🔖|🏷️|🏷|:bookmark:|:label:|(v(er)?[^a-zA-Z0-9]*[0-9]+|ver(sion)?|bump|release)\\b)", group = "<!-- 9-2 -->${{ inputs.cat-version }}" },
-        
-          # Catch-all:
-          # Everything else (uncategorized commits / PR merges).
-          # Internal group name is hard-coded, and the actual title is used later in the template, depending on the presence of other (properly classified) categories
-          { message = ".*", group = "<!-- 9-1 -->🔀 Changes" },
-        ]
-        
-        [remote.github]
-        owner = "${{ github.repository_owner }}"
-        repo = "${{ github.event.repository.name }}"
-        
-        [changelog]
-        trim = true
-        header = ""
-        footer = ""
-        body = """
-        {%- set grouped = commits | group_by(attribute="group") -%}
-        {%- set has_specific = false -%}
-        {%- for g, gc in grouped -%}
-          {%- set dg = g | striptags | trim | upper_first -%}
-          {%- if dg != "🔀 Changes" and dg != "${{ inputs.cat-version }}" -%}
-            {%- set_global has_specific = true -%}
-          {%- endif -%}
-        {%- endfor -%}
-        {%- for group, commits in grouped -%}
-        {%- set display_group = group | striptags | trim | upper_first -%}
-        {% if display_group == "🔀 Changes" -%}
-        {%- if has_specific %}## ${{ inputs.cat-unclassified-multi }}{% else %}## ${{ inputs.cat-unclassified-only }}{% endif %}
-        {%- else %}
-        ## {{ display_group }}
-        {%- endif %}
-        
-        {% for commit in commits %}
-        {%- set msg = commit.message | trim -%}
-        {%- set title = msg | split(pat="\n") | first | trim -%}
-        {%- set cbody = msg | split(pat="\n") | slice(start=1) | join(sep="\n") | trim -%}
-        {%- set sha7 = commit.id | truncate(length=7, end="") -%}
-        {%- set who = commit.remote.username | default(value=commit.author.name) -%}
-        - {% if commit.remote.pr_number -%}
-        {{ commit.remote.pr_title | default(value=title) }} — #{{ commit.remote.pr_number }} by @{{ who }}
-        {%- else -%}
-        {{ title }} — {{ commit.id }} by @{{ who }}
-        {%- if cbody %}
-        {{ "  > " ~ cbody | replace(from="\n", to="\n  > ") }}
-        {%- endif %}
-        {%- endif %}
-        {% endfor %}
-        {% endfor %}
-        """
-        EOT
+      env:
+        cat_breaking: ${{ inputs.cat-breaking }}
+        cat_depr: ${{ inputs.cat-depr }}
+        cat_revert: ${{ inputs.cat-revert }}
+        cat_feat: ${{ inputs.cat-feat }}
+        cat_enhance: ${{ inputs.cat-enhance }}
+        cat_fix: ${{ inputs.cat-fix }}
+        cat_perf: ${{ inputs.cat-perf }}
+        cat_security: ${{ inputs.cat-security }}
+        cat_doc: ${{ inputs.cat-doc }}
+        cat_refactor: ${{ inputs.cat-refactor }}
+        cat_test: ${{ inputs.cat-test }}
+        cat_style: ${{ inputs.cat-style }}
+        cat_build: ${{ inputs.cat-build }}
+        cat_ci: ${{ inputs.cat-ci }}
+        cat_chore: ${{ inputs.cat-chore }}
+        cat_version: ${{ inputs.cat-version }}
+        cat_unclassified_multi: ${{ inputs.cat-unclassified-multi }}
+        cat_unclassified_only: ${{ inputs.cat-unclassified-only }}
+        github_owner: ${{ github.repository_owner }}
+        github_repo: ${{ github.event.repository.name }}
+        out_config_file: "${{ runner.temp }}/cliff.just-release-it.toml"
+      run: python '${{ github.action_path }}/prepare-cliff-config.py'
 
     - name: 📝 Build changelog with git-cliff ⛰️
       id: build-changelog
       uses: orhun/git-cliff-action@v4
       with:
 #        version: ${{ steps.version-outputs.outputs.raw_version }}  # version of cliff itself
-        config: ${{ inputs.cliff-config-file != '' && inputs.cliff-config-file || '/tmp/cliff.just-release-it.toml' }}
+        config: ${{ inputs.cliff-config-file != '' && inputs.cliff-config-file || format('{0}/cliff.just-release-it.toml', runner.temp) }}
         args: --unreleased --strip all ${{ env.CLIFF_SKIP_ARGS }}
       env:
         OUTPUT: '${{ runner.temp }}/changelog.just-release-it.md'
