@@ -453,40 +453,47 @@ body = """
     {%- set_global has_specific = true -%}
   {%- endif -%}
 {%- endfor -%}
+
 {%- for group, commits in grouped -%}
-{%- set display_group = group | striptags | trim | upper_first -%}
-{%- set_global alert_type = "" -%}
-{%- set_global alert_indent = "" -%}${{ PUT_ALERT_TEMPLATE_LINES_HERE }}
-{% if display_group == "🔀 Changes" -%}
-  {%- if has_specific -%}
-  {{ alert_indent }}## ${{ inputs.cat-unclassified-multi }}
-  {%- else -%}
-  {{ alert_indent }}## ${{ inputs.cat-unclassified-only }}
+  {%- set display_group = group | striptags | trim | upper_first -%}
+  {%- set_global alert_type = "" -%}
+  {%- set_global alert_indent = "" -%}${{ PUT_ALERT_TEMPLATE_LINES_HERE }}
+  {%- if display_group == "🔀 Changes" -%}
+    {#- For the uncategorized changes, override the cat title: -#}
+    {%- if has_specific -%}
+      {%- set_global display_group = "${{ inputs.cat-unclassified-multi }}" -%}
+    {%- else -%}
+      {%- set_global display_group = "${{ inputs.cat-unclassified-only }}" -%}
+    {%- endif -%}
   {%- endif -%}
-{% else -%}
-  {{ alert_indent }}## {{ display_group }}
-{%- endif %}
-{{ alert_indent }}
-{% for commit in commits %}
-{%- set msg = commit.message | trim -%}
-{%- set title = msg | split(pat="\n") | first | trim -%}
-{%- set cbody = msg | split(pat="\n") | slice(start=1) | join(sep="\n") | trim -%}
-{%- set sha7 = commit.id | truncate(length=7, end="") -%}
-{%- set who = commit.remote.username | default(value=commit.author.name) -%}
-{{ alert_indent }}- {% if commit.remote.pr_number -%}
-{{ commit.remote.pr_title | default(value=title) }} — #{{ commit.remote.pr_number }} by @{{ who }}
-{%- else -%}
-{{ title }} — {{ commit.id }} by @{{ who }}
-{%- if cbody %}
-{{ alert_indent ~ "  > " ~ cbody | replace(from="\n", to="\n" ~ alert_indent ~ "  > ") }}
-{%- endif %}
-{%- endif %}
-{% endfor %}
-{% endfor %}
+  {#- Output the category title: -#}
+{{ alert_indent }}## {{ display_group }}
+{{ alert_indent ~ "\n" -}}
+  {%- for commit in commits -%}
+    {%- set msg = commit.message | trim -%}
+    {%- set title = msg | split(pat="\n") | first | trim -%}
+    {%- set commit_body = msg | split(pat="\n") | slice(start=1) | join(sep="\n") | trim -%}
+    {%- set sha7 = commit.id | truncate(length=7, end="") -%}
+    {%- set who = commit.remote.username | default(value=commit.author.name) -%}
+    {%- if commit.remote.pr_number -%}
+      {#- List item when it's a PR: -#}
+{{ alert_indent }}- {{ commit.remote.pr_title | default(value=title) }} — #{{ commit.remote.pr_number }} by @{{ who ~ "\n" }}
+    {%- else -%}
+      {#- List item when it's a regular commit: -#}
+{{ alert_indent }}- {{ title }} — {{ commit.id }} by @{{ who ~ "\n" }}
+      {#- If message is multiline, also attach the remaining lines under -#}
+      {#- the list item, indenting it and putting into a quote: -#}
+      {%- if commit_body and display_group != "${{ inputs.cat-revert }}" -%}
+      	{%- set indented_body_under_list = "  > " ~ commit_body | replace(from="\n", to="\n" ~ alert_indent ~ "  > ") -%}
+{{ alert_indent ~ indented_body_under_list ~ "\n" }}
+      {%- endif -%}
+    {%- endif -%}
+  {%- endfor %}{# Non-stripped newline here - after the whole section #}
+{% endfor -%}
 """
 		'''.strip()
 
-		alert_template_lines = '\n' + r"""
+		alert_lines_str = '\n' + r"""
 {%- if display_group == "${{ inputs.cat-breaking }}" -%}
   {%- set_global alert_type = "CAUTION" -%}
   {%- set_global alert_indent = "> " -%}
@@ -501,10 +508,11 @@ body = """
 > [!{{ alert_type }}]
 {% endif -%}
 		""".strip()
-		if not self.cat_alert_blocks:
-			alert_template_lines = ''
 
-		lines_str = lines_str.replace('${{ PUT_ALERT_TEMPLATE_LINES_HERE }}', alert_template_lines)
+		lines_str = lines_str.replace(
+			'${{ PUT_ALERT_TEMPLATE_LINES_HERE }}',
+			alert_lines_str if self.cat_alert_blocks else ''
+		)
 
 		# Since the template itself contains A TON of curly braces,
 		# let's put the values with simple replace instead of format:
