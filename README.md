@@ -14,6 +14,10 @@ An example of generated release: https://github.com/Lex-DRL/test-ComfyUI-dummy/r
 
 ## Just set it up!
 
+**ULTRA-TL;DR**:
+- Just use the action in your GitHub workflow.
+- It should "just work" for a usual solo-dev project.
+
 TL;DR:
 - Have a `pyproject.toml` file in the repo root.
 - Make sure it contains the `version` field under the main `[project]` section:
